@@ -1,0 +1,78 @@
+\documentclass{article}
+
+\usepackage[letterpaper,top=1in,bottom=1in,right=1in,left=1.2in]{geometry}
+\usepackage{datatool}
+\usepackage{booktabs}
+\usepackage{siunitx}
+\usepackage{newcent}
+\usepackage{wrapfig}
+\usepackage{datetime}
+
+\newcommand{\horizrule}{\noindent\rule{\linewidth}{0.15mm}}
+
+\begin{document}
+
+\begin{wrapfigure}{r}{1.25in}
+  \fbox{\Huge{}\bf{}LOGO}
+\end{wrapfigure}
+
+\noindent
+{\bf{}MacEwan University}\\
+PO Box 1796\\
+Edmonton, AB ~ T5J 2P2\\
+Canada
+
+\horizrule
+
+\newdateformat{dashdate}{%
+\twodigit{\THEYEAR}-\twodigit{\THEMONTH}-\THEDAY}
+
+\begin{center}
+  {\Large{}Receipt}\\
+  \dashdate\today{} at \currenttime
+\end{center}
+
+\DTLsetnumberchars{}{.}
+\IfFileExists{.receipt}{%
+  \DTLloaddb[noheader,keys={Code,Description,Quantity,Price}]{data}{.receipt}
+}{%
+  \DTLnewdb{data}
+}
+
+\sisetup{
+  input-decimal-markers = .     ,
+  round-minimum = 2             ,
+  round-mode = places           ,
+  round-integer-to-decimal      ,
+}
+
+\def\total{0}
+\def\subtotal{0}
+\begin{center}
+  \begin{tabular}{lp{2in}rS[table-format=7.2]S[table-format=7.2]}
+    \toprule
+    \bfseries Item \# &
+    \bfseries Description &
+    \multicolumn{1}{r}{\bfseries Quantity} &
+    \multicolumn{1}{r}{\bfseries Price} &
+    \multicolumn{1}{r}{\bfseries Total} \\
+    \midrule
+    \DTLforeach{data}{%
+      \qua=Quantity,\cod=Code,\pri=Price,\des=Description}{%
+      \DTLgmul\subtotal{\pri}{\qua}%
+      \DTLgadd\total{\total}{\subtotal}%
+      \cod & \des & \qua & \pri & \subtotal \\}
+    \\[-1em] % workaround for inability to place \midrule after \DTLforeach
+    \midrule
+    & & & & \total \\
+    \bottomrule
+  \end{tabular}  
+\end{center}
+
+\vspace{2em}
+
+\begin{center}
+  Thank you for your business.
+\end{center}
+
+\end{document}

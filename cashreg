@@ -1,0 +1,312 @@
+#!/bin/bash
+# Name: Albert Vu
+# Date: December 8, 2021
+# Course: CMPT 220
+# Assignment: 3
+
+function display_banner() {
+
+cat <<EOF
+
+Cash Register v0.1
+EOF
+}
+
+function display_prompt() {
+
+	echo -ne "\nSelection (h for help)? "
+} 
+
+function display_help() {
+
+cat <<EOF
+Items
+  d  list by description
+  i  list by item number
+  p  list by price
+Transactions
+  [[-]#] ####  add +/- quantity
+  s  show cart
+  t  show total
+  a  abort transaction
+  f  finalize transaction
+Other
+  q  quit
+EOF
+}
+
+function list_header() {
+
+cat <<EOF
+Code     Price  Description
+
+EOF
+}
+
+function list_items() {
+	
+	local criteria="$1"
+	
+	# sort and display items by criteria
+	case $criteria in
+		d)	# description
+			echo "$({ echo "$(list_header)"; echo "$(awk '
+			{ printf "%s%10s  %s\n", $1, $2, $3 }
+			' FS="\t" items.dat | sort -k 3)"; } | less)"
+			;;
+		i)	# item number
+			echo "$({ echo "$(list_header)"; echo "$(awk '
+			{ printf "%s%10s  %s\n", $1, $2, $3 }
+			' FS="\t" items.dat | sort)"; } | less)" 
+			;;
+		p)	# price
+			echo "$({ echo "$(list_header)"; echo "$(awk '
+			{ printf "%s%10s  %s\n", $1, $2, $3 }
+			' FS="\t" items.dat | sort -nk 2)"; } | less)"
+			;;
+	esac
+}
+
+function touch_cart() {
+	
+	# create .cart file if it doesn't exist
+	touch ".cart"
+}
+
+function add_cart() {
+
+	touch_cart
+	local opt="$1"
+
+	# check if optional quantity was specified or not
+	case $opt in
+		*" "*)
+			quantity="$(echo "$opt" | cut -d " " -f 1)"
+			code="$(echo "$opt" | cut -d " " -f 2)"
+			;;
+		*)
+			quantity=1
+			code="$opt"
+			;;
+	esac	
+
+	item="${items[$code]}"
+    price="$(echo "$item" | cut -f 2)"
+    desc="$(echo "$item" | cut -f 3)"
+
+    # formatted string to write to .cart file
+    printf "%8s    %s%10s  %s\n" "$quantity" "$code" "$price" "$desc" >> ".cart"
+
+	# confirmation message
+	echo -e "\nAdded $quantity x $desc @ $price each"
+}
+
+function sub_cart() {
+
+	touch_cart
+	local opt="$1"
+
+	quantity="$(echo "$opt" | cut -d " " -f 1)"
+	code="$(echo "$opt" | cut -d " " -f 2)"
+	item="${items[$code]}"
+	price="$(echo "$item" | cut -f 2)"
+	desc="$(echo "$item" | cut -f 3)"
+
+	# formatted string to write to .cart file
+	printf "%8s    %s%10s  %s\n" "$quantity" "$code" "$price" "$desc" >> ".cart"
+
+	# confirmation message
+    echo -e "\nAdded $quantity x $desc @ $price each"
+}
+
+function show_cart() {
+	
+	touch_cart
+	
+	# check if .cart is empty or not
+	if test -s ".cart"
+	then
+		printf "\nQuantity    Code     Price  Description\n"
+		echo "$(cat .cart)"	# echo .cart contents
+	else
+		echo -e "\nEmpty."
+	fi
+}
+
+function show_total() {
+
+	touch_cart
+	local quantity
+	local price
+	local subtotal
+	local total=0
+
+	# check if .cart has items in it
+	if test -s ".cart"
+	then
+		# parse .cart file and compute calculations
+		while IFS= read -r line
+    	do  
+       		quantity="$(echo "$line" | cut -b -8 | xargs)"
+        	price="$(echo "$line" | cut -b 17-27 | xargs)"
+			subtotal="$(echo "scale=2; $quantity * $price" | bc)"
+			total="$(echo "scale=2; $total + $subtotal" | bc)"
+    	done < ".cart"		
+		echo "$total"
+	else
+		# output 0.00 if cart is empty
+		echo "0.00"
+	fi
+}
+
+function abort() {
+
+	local user_input=""
+	
+	# continuously prompt user until they input exactly "Yes" or "No"
+	echo
+	while test "$user_input" != "Yes" -a "$user_input" != "No"
+	do
+		read -p "Abort transaction (Yes/No)? " user_input
+	done
+
+	# abort transaction (delete .cart) or do nothing
+	if test "$user_input" == "Yes"
+	then
+		rm ".cart"
+	fi
+}
+
+function finalize() {
+
+	local total
+	local payment=0
+	
+	total="$(show_total)"
+	
+	# continuously prompt user for payment until total is paid or they abort
+	echo
+	while (( $(echo "$total > 0" | bc) ))
+	do
+		echo -n "Enter payment ($total remaining, blank to abort): "
+		read payment
+		if test "$payment" == ""
+		then
+			break
+		fi
+		total="$(echo "$total - $payment" | bc)"		
+	done  
+
+	# show change and begin receipt process after full payment
+	if test "$payment" != ""
+	then
+		total="$(echo "$total * -1" | bc)"
+		echo "Change: $total"
+		receipt
+	fi
+}
+
+function receipt() {
+
+	declare -A quantities
+	local quantity
+	local code
+
+	# parse .cart file to change item quantities
+	while IFS= read -r line
+	do
+		quantity="$(echo "$line" | cut -b -8 | xargs)"
+		code="$(echo "$line" | cut -b 13-16)"	
+		# store item code as key, item quantity as value
+		if test "${quantities[$code]}"
+		then
+			quantity="$(echo "$quantity + ${quantities[$code]}" | bc)"
+		fi	
+		quantities["$code"]="$quantity"		
+	done < ".cart"	
+
+	# overwrite receipt
+	printf "" > ".receipt"
+
+	# go through each item with non-zero quantity and add to receipt
+	for i in ${!quantities[@]}
+	do
+		if test "${quantities[$i]}" -ne 0
+		then
+			item="${items[$i]}"
+			price="$(echo "$item" | cut -f 2)"
+			desc="$(echo "$item" | cut -f 3)"
+			printf "$i,$desc,${quantities[$i]},$price\n" >> ".receipt"
+		fi
+	done
+	
+	# sort items in receipt by item code
+	cat ".receipt" | sort -o ".receipt"
+
+	echo -e "\nGenerating PDF..."
+	pdflatex receipt < /dev/null > /dev/null
+	echo "Displaying PDF..."
+	evince receipt.pdf &> /dev/null
+
+	# check if PDF opens and closes successfully
+	if test "$?" -eq 0
+	then	
+		rm .cart
+	fi
+}
+
+function main() {
+
+	display_banner
+
+    declare -gA items	# global associative array
+	local opt
+    local quantity
+    local code
+	
+	# parse items.dat file
+	while IFS= read -r line
+	do	# store items in associative array
+		code="$(echo "$line" | cut -f 1)"
+		items["$code"]="$line"
+	done < "items.dat"	
+
+	# indefintely prompt user and execute option
+	while true
+	do
+		display_prompt
+		read opt
+		case $opt in
+			d|i|p)
+				echo -n "$(list_items "$opt")"
+				;;		
+			[1-9]*)
+				add_cart "$opt"
+				;;
+			-[1-9]*)
+				sub_cart "$opt"
+				;;		
+			s)
+				echo "$(show_cart)"
+				;;
+			t)
+				echo -e "\nTotal: $(show_total)"
+				;;
+			a)
+				abort
+				;;
+			f)
+				finalize
+				;;
+			q)
+				exit
+				;;
+			h|*)
+				echo -e "\n$(display_help)"
+				;;
+		esac
+	done
+}
+
+main "$@"
+
